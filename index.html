@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>🍉 合成小磊磊 · 完全稳定版 🍉</title>
+    <style>
+        * {
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
+
+        /* 彻底禁止任何滚动和偏移 */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        body {
+            background: linear-gradient(145deg, #a8ede6 0%, #6bc7bc 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 主容器 - 完全固定，不受任何子元素影响 */
+        .game-container {
+            position: relative;
+            background: rgba(0, 0, 0, 0.18);
+            border-radius: 60px;
+            padding: 16px 12px 20px;
+            backdrop-filter: blur(2px);
+            /* 关键：固定定位，不受画布内动画影响 */
+            will-change: auto;
+            transform: translate3d(0, 0, 0);
+            /* 禁止任何子元素导致的重新布局 */
+            contain: layout style paint;
+        }
+
+        .game-panel {
+            position: relative;
+            background: #fff7e8;
+            border-radius: 48px 48px 40px 40px;
+            padding: 16px 18px 20px;
+            box-shadow: 0 20px 28px rgba(0, 0, 0, 0.3);
+            transform: translate3d(0, 0, 0);
+            contain: layout style paint;
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            background: #f5e2be;
+            border-radius: 80px;
+            padding: 5px 16px 5px 20px;
+            flex-wrap: wrap;
+        }
+
+        .score-box, .best-box, .steps-box {
+            background: #553b26;
+            border-radius: 50px;
+            padding: 4px 14px;
+            color: #ffefc0;
+            font-weight: bold;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: inset 0 1px 1px rgba(255,255,200,0.2), 0 3px 0 #2f1e12;
+        }
+
+        .score-box span, .best-box span, .steps-box span {
+            background: #ffcf7a;
+            color: #3b2415;
+            padding: 0px 12px;
+            border-radius: 40px;
+            font-size: 1.3rem;
+            font-weight: 800;
+            line-height: 1.3;
+        }
+
+        .reset-btn {
+            background: #ffaa55;
+            border: none;
+            font-size: 1.1rem;
+            font-weight: bold;
+            padding: 5px 22px;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: 0.07s linear;
+            box-shadow: 0 4px 0 #aa5a2a;
+            font-family: inherit;
+            color: #2f1d0e;
+        }
+
+        .reset-btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 #aa5a2a;
+        }
+
+        /* 画布 - 独立图层，完全隔离 */
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background: #fef3df;
+            border-radius: 40px;
+            box-shadow: inset 0 0 0 3px #fff7e6, 0 10px 24px rgba(0, 0, 0, 0.5);
+            cursor: grab;
+            touch-action: none;
+            width: 600px;
+            height: 600px;
+            /* 独立合成层，隔离重绘影响 */
+            transform: translate3d(0, 0, 0);
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            /* 关键：隔离布局影响 */
+            will-change: transform;
+            contain: strict;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .info-footer {
+            margin-top: 14px;
+            text-align: center;
+            font-size: 0.7rem;
+            background: #ebd7b0;
+            border-radius: 28px;
+            padding: 5px 10px;
+            color: #3d2b1a;
+            font-weight: 600;
+        }
+        .rule-note {
+            font-size: 0.65rem;
+            margin-top: 6px;
+            color: #7a5a3a;
+        }
+    </style>
+</head>
+<body>
+<div class="game-container">
+    <div class="game-panel">
+        <div class="top-bar">
+            <div class="steps-box">🎯 步数 <span id="stepsValue">0</span></div>
+            <div class="best-box">🏆 最少步数 <span id="bestStepsValue">—</span></div>
+            <div class="score-box">🍭 额外分 <span id="scoreValue">0</span></div>
+            <button class="reset-btn" id="resetGameBtn">✨ 新的一局 ✨</button>
+        </div>
+
+        <canvas id="gameCanvas" width="600" height="600"></canvas>
+        <div class="info-footer">
+            🎲 随机掉落球球  每次扔球为1步 步数越少越厉害 🎲
+            <div class="rule-note">⭐目标：最少步数合成终极磊磊 ⭐</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function(){
+        // ---------- 游戏配置 ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const CANVAS_W = 600;
+        const CANVAS_H = 600;
+        canvas.width = CANVAS_W;
+        canvas.height = CANVAS_H;
+        
+        const MAX_LEVEL = 9;
+        const DROP_MAX_BASE = 5;
+        
+        const getRadiusByLevel = (level) => {
+            if(level === 9) return 150;
+            return 24 + (level-1) * 10.8;
+        };
+        
+        const scoreForLevel = (level) => {
+            return level * 8;
+        };
+        
+        const images = {};
+        
+        const GRAVITY = 0.26;
+        const BOUNCE = 0.55;
+        const FRICTION_AIR = 0.99;
+        const FRICTION_CONTACT = 0.98;
+        const COLLISION_ITER = 4;
+        
+        let balls = [];
+        let currentBall = null;
+        let dragX = CANVAS_W/2;
+        let dragActive = false;
+        let gameOver = false;
+        let winFlag = false;
+        
+        let currentSteps = 0;
+        let bestSteps = Infinity;
+        let currentScore = 0;
+        
+        const stepsSpan = document.getElementById('stepsValue');
+        const bestStepsSpan = document.getElementById('bestStepsValue');
+        const scoreSpan = document.getElementById('scoreValue');
+        const resetBtn = document.getElementById('resetGameBtn');
+        
+        function updateStepsUI() {
+            stepsSpan.innerText = currentSteps;
+            if (bestSteps !== Infinity && bestSteps < 9999) {
+                bestStepsSpan.innerText = bestSteps;
+            } else {
+                bestStepsSpan.innerText = '✨';
+            }
+        }
+        
+        function updateScoreUI() {
+            scoreSpan.innerText = currentScore;
+        }
+        
+        function addScore(level) {
+            currentScore += scoreForLevel(level);
+            updateScoreUI();
+        }
+        
+        function incrementStep() {
+            currentSteps++;
+            updateStepsUI();
+        }
+        
+        function getRandomDropLevel() {
+            let maxLevelOnField = 1;
+            for(let b of balls) {
+                if(b.level > maxLevelOnField) maxLevelOnField = b.level;
+            }
+            let maxCanDrop = Math.min(maxLevelOnField - 1, DROP_MAX_BASE);
+            if(maxCanDrop < 1) maxCanDrop = 1;
+            let randomLevel = Math.floor(Math.random() * maxCanDrop) + 1;
+            randomLevel = Math.min(randomLevel, DROP_MAX_BASE);
+            randomLevel = Math.max(randomLevel, 1);
+            return randomLevel;
+        }
+        
+        function drawHighQualityBall(ball) {
+            const img = images[ball.level];
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2);
+            ctx.closePath();
+            ctx.clip();
+            
+            if(img && img.complete && img.naturalWidth > 0) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+                const size = ball.radius * 2;
+                ctx.drawImage(img, ball.x - ball.radius, ball.y - ball.radius, size, size);
+            } else {
+                const grad = ctx.createLinearGradient(ball.x - ball.radius, ball.y - ball.radius, ball.x + ball.radius, ball.y + ball.radius);
+                grad.addColorStop(0, `hsl(${ball.level * 40}, 75%, 65%)`);
+                grad.addColorStop(1, `hsl(${ball.level * 40 + 30}, 80%, 55%)`);
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = "#ffffff";
+                ctx.font = `bold ${Math.floor(ball.radius * 0.55)}px "Segoe UI"`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.shadowBlur = 4;
+                ctx.shadowColor = "rgba(0,0,0,0.3)";
+                ctx.fillText(`${ball.level}`, ball.x, ball.y);
+                ctx.shadowBlur = 0;
+            }
+            ctx.restore();
+            
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius-1.5, 0, Math.PI*2);
+            ctx.strokeStyle = "rgba(80, 50, 20, 0.3)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            if(ball.level === MAX_LEVEL) {
+                ctx.beginPath();
+                ctx.arc(ball.x, ball.y, ball.radius + 5, 0, Math.PI*2);
+                ctx.fillStyle = "rgba(255,200,80,0.2)";
+                ctx.fill();
+            }
+        }
+        
+        function loadAllImages() {
+            let loadedCount = 0;
+            const total = MAX_LEVEL;
+            return new Promise((resolve) => {
+                for(let i = 1; i <= MAX_LEVEL; i++) {
+                    const img = new Image();
+                    img.src = `${i}.png`;
+                    img.onload = () => {
+                        images[i] = img;
+                        loadedCount++;
+                        if(loadedCount === total) {
+                            resolve();
+                        }
+                    };
+                    img.onerror = () => {
+                        const canvasFallback = document.createElement('canvas');
+                        const size = 400;
+                        canvasFallback.width = size;
+                        canvasFallback.height = size;
+                        const fCtx = canvasFallback.getContext('2d');
+                        const grad = fCtx.createLinearGradient(0,0,size,size);
+                        grad.addColorStop(0, `hsl(${i * 40}, 75%, 60%)`);
+                        grad.addColorStop(1, `hsl(${i * 40 + 25}, 80%, 50%)`);
+                        fCtx.fillStyle = grad;
+                        fCtx.beginPath();
+                        fCtx.arc(size/2, size/2, size/2-8, 0, Math.PI*2);
+                        fCtx.fill();
+                        fCtx.fillStyle = "white";
+                        fCtx.font = `bold ${size * 0.4}px "Segoe UI"`;
+                        fCtx.textAlign = "center";
+                        fCtx.textBaseline = "middle";
+                        fCtx.shadowBlur = 8;
+                        fCtx.fillText(`${i}`, size/2, size/2);
+                        const fallbackImg = new Image();
+                        fallbackImg.src = canvasFallback.toDataURL();
+                        fallbackImg.onload = () => {
+                            images[i] = fallbackImg;
+                            loadedCount++;
+                            if(loadedCount === total) {
+                                resolve();
+                            }
+                        };
+                    };
+                }
+            });
+        }
+        
+        function checkWinByMaxLevel() {
+            for(let b of balls) {
+                if(b.level === MAX_LEVEL) {
+                    if(!winFlag) {
+                        winFlag = true;
+                        gameOver = true;
+                        if(currentSteps < bestSteps) {
+                            bestSteps = currentSteps;
+                            localStorage.setItem('bestStepsMergeLei', bestSteps);
+                            updateStepsUI();
+                            setTimeout(() => {
+                                alert(`🎉✨ 恭喜！大磊磊合成成功！ ✨🎉\n✨ 所用步数: ${currentSteps} ✨\n🏆 最少步数记录: ${bestSteps} 🏆`);
+                            }, 50);
+                        } else {
+                            setTimeout(() => {
+                                alert(`🎉✨ 合成磊磊成功！ ✨🎉\n本次步数: ${currentSteps}`);
+                            }, 50);
+                        }
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        function checkGameOver() {
+            for(let b of balls) {
+                if(b.y - b.radius <= 8 && b.vy < -0.3) {
+                    if(!gameOver && !winFlag) {
+                        gameOver = true;
+                        setTimeout(() => {
+                            alert(`💔 游戏结束~ 💔\n本次步数: ${currentSteps}`);
+                        }, 30);
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        function applyPhysics() {
+            for(let iter=0; iter<COLLISION_ITER; iter++) {
+                for(let b of balls) {
+                    b.vx *= FRICTION_AIR;
+                    b.vy += GRAVITY;
+                    b.vy *= FRICTION_AIR;
+                    b.x += b.vx;
+                    b.y += b.vy;
+                    
+                    if(b.x - b.radius < 0) {
+                        b.x = b.radius;
+                        b.vx = -b.vx * BOUNCE;
+                    }
+                    if(b.x + b.radius > CANVAS_W) {
+                        b.x = CANVAS_W - b.radius;
+                        b.vx = -b.vx * BOUNCE;
+                    }
+                    if(b.y + b.radius > CANVAS_H) {
+                        b.y = CANVAS_H - b.radius;
+                        b.vy = -b.vy * BOUNCE;
+                        if(Math.abs(b.vy) < 0.5) b.vy = 0;
+                        b.vx *= FRICTION_CONTACT;
+                    }
+                    if(b.y - b.radius < 0) {
+                        b.y = b.radius;
+                        if(b.vy < 0) b.vy = -b.vy * 0.4;
+                    }
+                }
+                
+                for(let i=0; i<balls.length; i++) {
+                    for(let j=i+1; j<balls.length; j++) {
+                        const b1 = balls[i];
+                        const b2 = balls[j];
+                        const dx = b1.x - b2.x;
+                        const dy = b1.y - b2.y;
+                        const dist = Math.hypot(dx, dy);
+                        const minDist = b1.radius + b2.radius;
+                        if(dist < minDist) {
+                            const angle = Math.atan2(dy, dx);
+                            const overlap = minDist - dist;
+                            const moveX = Math.cos(angle) * overlap * 0.5;
+                            const moveY = Math.sin(angle) * overlap * 0.5;
+                            if(!b1.isMergeLock) { b1.x += moveX; b1.y += moveY; }
+                            if(!b2.isMergeLock) { b2.x -= moveX; b2.y -= moveY; }
+                            
+                            const vrelx = b1.vx - b2.vx;
+                            const vrely = b1.vy - b2.vy;
+                            const dot = vrelx * dx + vrely * dy;
+                            if(dot < 0) {
+                                const e = 0.6;
+                                const m1 = b1.radius ** 2;
+                                const m2 = b2.radius ** 2;
+                                const imp = (1+e) * dot / ((dx*dx+dy*dy) * (1/m1 + 1/m2));
+                                b1.vx -= imp * dx * (1/m1);
+                                b1.vy -= imp * dy * (1/m1);
+                                b2.vx += imp * dx * (1/m2);
+                                b2.vy += imp * dy * (1/m2);
+                            }
+                            
+                            if(b1.level === b2.level && b1.level < MAX_LEVEL && !b1.isMergeLock && !b2.isMergeLock) {
+                                b1.isMergeLock = true;
+                                b2.isMergeLock = true;
+                                const newLevel = b1.level + 1;
+                                const newX = (b1.x + b2.x)/2;
+                                const newY = (b1.y + b2.y)/2;
+                                const newRad = getRadiusByLevel(newLevel);
+                                const newBall = {
+                                    x: newX, y: newY, radius: newRad, level: newLevel,
+                                    vx: (b1.vx + b2.vx)*0.55, vy: (b1.vy + b2.vy)*0.55,
+                                    isMergeLock: false, isNewThisFrame: false
+                                };
+                                balls.splice(j,1);
+                                balls.splice(i,1);
+                                balls.push(newBall);
+                                addScore(newLevel);
+                                i = -1;
+                                break;
+                            }
+                        }
+                    }
+                }
+                for(let b of balls) b.isMergeLock = false;
+            }
+        }
+        
+        function spawnNewCurrentBall() {
+            if(gameOver) return;
+            if(currentBall) return;
+            const randomLevel = getRandomDropLevel();
+            const radius = getRadiusByLevel(randomLevel);
+            currentBall = {
+                x: CANVAS_W/2, y: 28, radius: radius, level: randomLevel,
+                vx: 0, vy: 0, isMergeLock: false, isNewThisFrame: true
+            };
+            dragActive = true;
+            dragX = CANVAS_W/2;
+        }
+        
+        function releaseCurrentBall(targetX) {
+            if(!currentBall || gameOver) return;
+            let releaseX = Math.min(Math.max(targetX, currentBall.radius), CANVAS_W - currentBall.radius);
+            currentBall.x = releaseX;
+            currentBall.y = 38;
+            currentBall.vy = 1.0 + Math.random() * 0.8;
+            currentBall.vx = (Math.random() - 0.5) * 1.5;
+            currentBall.isNewThisFrame = false;
+            balls.push(currentBall);
+            currentBall = null;
+            dragActive = false;
+            incrementStep();
+            checkWinByMaxLevel();
+            checkGameOver();
+            if(!gameOver) spawnNewCurrentBall();
+        }
+        
+        function resetGame() {
+            gameOver = false;
+            winFlag = false;
+            balls = [];
+            if(currentBall) currentBall = null;
+            dragActive = false;
+            currentSteps = 0;
+            currentScore = 0;
+            updateStepsUI();
+            updateScoreUI();
+            const storedBest = localStorage.getItem('bestStepsMergeLei');
+            if(storedBest !== null) {
+                bestSteps = parseInt(storedBest);
+            } else {
+                bestSteps = Infinity;
+            }
+            updateStepsUI();
+            spawnNewCurrentBall();
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+            ctx.fillStyle = "#fef3df";
+            ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+            
+            ctx.strokeStyle = "#ecdcaa";
+            ctx.lineWidth = 1;
+            for(let i=0;i<4;i++){
+                ctx.beginPath();
+                ctx.moveTo(0, i*150);
+                ctx.lineTo(CANVAS_W, i*150);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(i*150, 0);
+                ctx.lineTo(i*150, CANVAS_H);
+                ctx.stroke();
+            }
+            
+            for(let b of balls) drawHighQualityBall(b);
+            if(currentBall && !gameOver) {
+                let tempX = dragActive ? dragX : currentBall.x;
+                let showBall = {...currentBall, x: Math.min(Math.max(tempX, currentBall.radius), CANVAS_W - currentBall.radius)};
+                drawHighQualityBall(showBall);
+                ctx.beginPath();
+                ctx.moveTo(showBall.x, 15);
+                ctx.lineTo(showBall.x, showBall.y-6);
+                ctx.strokeStyle = "#ffbc6e";
+                ctx.setLineDash([5,6]);
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            if(gameOver && !winFlag) {
+                ctx.font = "bold 28px 'Segoe UI'";
+                ctx.fillStyle = "#c04e34";
+                ctx.fillText("😭 合成失败", CANVAS_W/2-90, 80);
+            } else if(winFlag) {
+                ctx.font = "bold 26px 'Segoe UI'";
+                ctx.fillStyle = "#ff8833";
+                ctx.fillText("✨ 全世界最帅的磊磊 ✨", CANVAS_W/2-155, 70);
+                ctx.font = "18px monospace";
+                ctx.fillStyle = "#aa6644";
+                ctx.fillText(`步数: ${currentSteps}  |  最佳: ${bestSteps === Infinity ? '—' : bestSteps}`, CANVAS_W/2-115, 115);
+            }
+        }
+        
+        function updateAndRender() {
+            if(!gameOver) {
+                applyPhysics();
+                checkGameOver();
+                if(!gameOver) checkWinByMaxLevel();
+            }
+            draw();
+            requestAnimationFrame(updateAndRender);
+        }
+        
+        function handleDrag(clientX) {
+            if(!dragActive || !currentBall || gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            let canvasX = (clientX - rect.left) * scaleX;
+            canvasX = Math.min(Math.max(canvasX, currentBall.radius), CANVAS_W - currentBall.radius);
+            dragX = canvasX;
+        }
+        
+        function handleRelease(clientX) {
+            if(!dragActive || !currentBall || gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            let canvasX = (clientX - rect.left) * scaleX;
+            releaseCurrentBall(canvasX);
+        }
+        
+        function initEvents() {
+            const getClientX = (e) => e.touches ? e.touches[0].clientX : e.clientX;
+            canvas.addEventListener('mousemove', (e) => { if(dragActive) handleDrag(e.clientX); });
+            canvas.addEventListener('mouseup', (e) => { if(dragActive) handleRelease(e.clientX); });
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); if(dragActive) handleDrag(e.touches[0].clientX); });
+            canvas.addEventListener('touchend', (e) => { e.preventDefault(); if(dragActive && e.changedTouches[0]) handleRelease(e.changedTouches[0].clientX); });
+            canvas.addEventListener('mousedown', (e) => { if(!gameOver && currentBall) { dragActive=true; handleDrag(e.clientX); } });
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); if(!gameOver && currentBall) { dragActive=true; handleDrag(e.touches[0].clientX); } });
+        }
+        
+        async function initGame() {
+            await loadAllImages();
+            const storedBest = localStorage.getItem('bestStepsMergeLei');
+            if(storedBest !== null && !isNaN(parseInt(storedBest))) {
+                bestSteps = parseInt(storedBest);
+            } else {
+                bestSteps = Infinity;
+            }
+            updateStepsUI();
+            resetGame();
+            initEvents();
+            updateScoreUI();
+            updateAndRender();
+        }
+        
+        resetBtn.addEventListener('click', () => {
+            resetGame();
+        });
+        
+        initGame();
+    })();
+</script>
+</body>
+</html>
